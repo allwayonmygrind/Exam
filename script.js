@@ -189,3 +189,193 @@ document.querySelector('#editor-reset').addEventListener('click', () => {
   saveEditor();
   editorInput.focus({ preventScroll: true });
 });
+
+// 타이틀 바에서만 드래그합니다. 편집/저장 코드는 그대로 사용합니다.
+const dragWrapper = document.querySelector('#editor-drag-wrapper');
+const dragHandle = editorPanel.querySelector('.editor-bar');
+const heroSection = document.querySelector('#home');
+const desktopPointer = window.matchMedia('(min-width: 761px) and (hover: hover) and (pointer: fine)');
+let dragX = 0;
+let dragY = 0;
+let dragState = null;
+
+function placeEditor(x, y) {
+  // 래퍼는 회전하지 않으므로 기존 회전 transform과 충돌하지 않습니다.
+  const rect = dragWrapper.getBoundingClientRect();
+  const hero = heroSection.getBoundingClientRect();
+  const baseLeft = rect.left - dragX;
+  const baseTop = rect.top - dragY;
+  const margin = 16; // 회전된 모서리도 잘리지 않게 여백을 둡니다.
+  const left = Math.max(margin, hero.left + margin);
+  const right = Math.min(document.documentElement.clientWidth, hero.right) - margin;
+  const headerBottom = document.querySelector('.header').getBoundingClientRect().bottom;
+  const top = Math.max(hero.top + margin, headerBottom + margin);
+  const bottom = Math.min(window.innerHeight, hero.bottom) - margin;
+  const minX = left - baseLeft;
+  const maxX = Math.max(minX, right - rect.width - baseLeft);
+  const minY = top - baseTop;
+  // 화면 높이가 낮아도 타이틀 바는 화면 안에 남깁니다.
+  const maxY = Math.max(minY, bottom - rect.height - baseTop);
+  dragX = Math.min(maxX, Math.max(minX, x));
+  dragY = Math.min(maxY, Math.max(minY, y));
+  dragWrapper.style.setProperty('--drag-x', `${dragX}px`);
+  dragWrapper.style.setProperty('--drag-y', `${dragY}px`);
+}
+
+function finishEditorDrag(event) {
+  if (!dragState || (event && event.pointerId !== dragState.id)) return;
+  const pointerId = dragState.id;
+  dragState = null;
+  dragWrapper.classList.remove('is-dragging');
+  document.body.classList.remove('is-editor-dragging');
+  if (dragHandle.hasPointerCapture(pointerId)) dragHandle.releasePointerCapture(pointerId);
+}
+
+dragHandle.addEventListener('pointerdown', (event) => {
+  if (!desktopPointer.matches || event.pointerType !== 'mouse' || event.button !== 0 || !event.isPrimary || dragState) return;
+  if (event.target.closest('button, a, input, textarea, select')) return;
+  event.preventDefault();
+  dragState = { id: event.pointerId, startX: event.clientX, startY: event.clientY, x: dragX, y: dragY };
+  dragHandle.setPointerCapture(event.pointerId);
+  dragWrapper.classList.add('is-dragging');
+  document.body.classList.add('is-editor-dragging');
+});
+dragHandle.addEventListener('pointermove', (event) => {
+  if (!dragState || event.pointerId !== dragState.id) return;
+  placeEditor(dragState.x + event.clientX - dragState.startX, dragState.y + event.clientY - dragState.startY);
+});
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach((name) => {
+  dragHandle.addEventListener(name, finishEditorDrag);
+});
+window.addEventListener('blur', () => finishEditorDrag());
+document.querySelector('#editor-close').addEventListener('click', () => finishEditorDrag());
+
+function adjustEditorPosition() {
+  finishEditorDrag();
+  if (!desktopPointer.matches) {
+    dragX = 0;
+    dragY = 0;
+    dragWrapper.style.removeProperty('--drag-x');
+    dragWrapper.style.removeProperty('--drag-y');
+  } else if (dragX !== 0 || dragY !== 0) {
+    placeEditor(dragX, dragY);
+  }
+}
+window.addEventListener('resize', adjustEditorPosition);
+desktopPointer.addEventListener('change', adjustEditorPosition);
+reopenEditor.addEventListener('click', adjustEditorPosition);
+
+// About의 두 문장만 분리합니다. 원문은 스크린리더용으로 한 번만 읽힙니다.
+const gravityRegion = document.querySelector('.about-intro');
+const gravityLetters = [];
+document.querySelectorAll('[data-gravity]').forEach((element) => {
+  const original = document.createElement('span');
+  original.className = 'sr-only';
+  original.append(...Array.from(element.childNodes, (node) => node.cloneNode(true)));
+  const visual = document.createElement('span');
+  visual.className = 'gravity-visual';
+  visual.setAttribute('aria-hidden', 'true');
+  visual.append(...Array.from(element.childNodes));
+  element.append(original, visual);
+
+  const walker = document.createTreeWalker(visual, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach((node) => {
+    const fragment = document.createDocumentFragment();
+    node.textContent.split(/(\s+)/).forEach((word) => {
+      if (!word) return;
+      if (/^\s+$/.test(word)) { fragment.append(document.createTextNode(word)); return; }
+      const group = document.createElement('span');
+      group.className = 'gravity-word';
+      Array.from(word).forEach((letter) => {
+        const span = document.createElement('span');
+        span.className = 'gravity-letter';
+        span.textContent = letter;
+        group.append(span);
+        gravityLetters.push({ element: span, x: 0, y: 0, vx: 0, vy: 0, cx: 0, cy: 0 });
+      });
+      fragment.append(group);
+    });
+    node.replaceWith(fragment);
+  });
+});
+
+const gravityPreference = window.matchMedia('(hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)');
+let gravityPointer = null;
+let gravityFrame = 0;
+let gravityTime = 0;
+let gravityNeedsMeasure = true;
+
+function animateGravity(time) {
+  gravityFrame = 0;
+  if (!gravityPreference.matches || document.hidden) return;
+  // 120Hz 화면에서도 같은 속도로 감속하도록 시간 차를 반영합니다.
+  const step = gravityTime ? Math.min((time - gravityTime) / 16.67, 2) : 1;
+  gravityTime = time;
+  if (gravityNeedsMeasure) {
+    gravityLetters.forEach((letter) => {
+      const rect = letter.element.getBoundingClientRect();
+      letter.cx = rect.left + rect.width / 2 - letter.x;
+      letter.cy = rect.top + rect.height / 2 - letter.y;
+    });
+    gravityNeedsMeasure = false;
+  }
+  let moving = false;
+  gravityLetters.forEach((letter) => {
+    let targetX = 0;
+    let targetY = 0;
+    if (gravityPointer) {
+      const dx = letter.cx - gravityPointer.x;
+      const dy = letter.cy - gravityPointer.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance < 120 && distance > 0) {
+        const force = 8 * (1 - distance / 120) ** 2;
+        targetX = dx / distance * force;
+        targetY = dy / distance * force;
+      }
+    }
+    letter.vx = (letter.vx + (targetX - letter.x) * .1 * step) * Math.pow(.65, step);
+    letter.vy = (letter.vy + (targetY - letter.y) * .1 * step) * Math.pow(.65, step);
+    letter.x += letter.vx * step;
+    letter.y += letter.vy * step;
+    const magnitude = Math.hypot(letter.x, letter.y);
+    if (magnitude > 8) { letter.x *= 8 / magnitude; letter.y *= 8 / magnitude; }
+    if (Math.abs(targetX - letter.x) + Math.abs(targetY - letter.y) + Math.abs(letter.vx) + Math.abs(letter.vy) > .015) moving = true;
+    else { letter.x = targetX; letter.y = targetY; letter.vx = 0; letter.vy = 0; }
+    letter.element.style.transform = `translate(${letter.x}px, ${letter.y}px)`;
+  });
+  if (moving) gravityFrame = requestAnimationFrame(animateGravity);
+  else gravityTime = 0;
+}
+
+function requestGravityFrame() {
+  if (!gravityFrame && gravityPreference.matches && !document.hidden) gravityFrame = requestAnimationFrame(animateGravity);
+}
+function releaseGravity() { gravityPointer = null; requestGravityFrame(); }
+gravityRegion.addEventListener('pointermove', (event) => {
+  if (!gravityPreference.matches || event.pointerType !== 'mouse') return;
+  gravityPointer = { x: event.clientX, y: event.clientY };
+  requestGravityFrame();
+});
+gravityRegion.addEventListener('pointerleave', releaseGravity);
+gravityRegion.addEventListener('pointercancel', releaseGravity);
+window.addEventListener('blur', releaseGravity);
+['scroll', 'resize'].forEach((name) => window.addEventListener(name, () => {
+  gravityNeedsMeasure = true;
+  releaseGravity();
+}, { passive: true }));
+function resetGravity() {
+  cancelAnimationFrame(gravityFrame);
+  gravityFrame = 0;
+  gravityTime = 0;
+  gravityPointer = null;
+  gravityNeedsMeasure = true;
+  gravityLetters.forEach((letter) => {
+    letter.x = letter.y = letter.vx = letter.vy = 0;
+    letter.element.style.transform = '';
+  });
+}
+gravityPreference.addEventListener('change', resetGravity);
+document.addEventListener('visibilitychange', resetGravity);
+if (document.fonts) document.fonts.ready.then(() => { gravityNeedsMeasure = true; });

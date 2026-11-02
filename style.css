@@ -37,3 +37,15 @@ dialog{background:#142139;color:var(--text);border:1px solid #496796;border-radi
 @media(max-width:1000px){.editor-workspace{--code-size:9px}}
 @media(max-width:760px){.editor-workspace{--code-size:clamp(10px,2.4vw,12px)}}
 @media(forced-colors:active){#editor-input{color:CanvasText;-webkit-text-fill-color:CanvasText}.editor-highlight{visibility:hidden}}
+/* 이동은 바깥 래퍼, 회전과 닫기 애니메이션은 기존 .editor가 담당합니다. */
+.editor-drag-wrapper{grid-area:1/1;min-width:0;position:relative;z-index:2;transform:translate(var(--drag-x,0px),var(--drag-y,0px))}
+.hero-visual.is-editor-closed .editor-drag-wrapper{pointer-events:none;z-index:0}
+.editor-drag-wrapper.is-dragging,.editor-drag-wrapper.is-dragging .editor{transition:none!important}
+body.is-editor-dragging,body.is-editor-dragging *{user-select:none!important;cursor:grabbing!important}
+@media(min-width:761px) and (hover:hover) and (pointer:fine){.editor-bar{cursor:grab;touch-action:none;user-select:none}.editor-bar button{cursor:pointer}}
+@media(max-width:760px){.editor-drag-wrapper{transform:none}}
+/* 단어 단위 줄바꿈은 유지하고 글자에는 위치 이동만 적용합니다. */
+.about-intro h2 .gravity-visual,.about-intro h2 .gravity-word,.about-intro h2 .gravity-letter{color:inherit}
+.gravity-word{display:inline-block;white-space:nowrap}
+.gravity-letter{display:inline-block;pointer-events:none;transform:translate(0,0)}
+@media(prefers-reduced-motion:reduce){.gravity-letter{transform:none!important}}
